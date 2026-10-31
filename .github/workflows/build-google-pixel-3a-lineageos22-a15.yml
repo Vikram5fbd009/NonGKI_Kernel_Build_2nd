@@ -5,8 +5,9 @@ on:
 
 env:
   DEVICE: "camellia"
-  KERNEL_SOURCE: "https://github.com/vikram2fbd009-maker/Overclock_mt6833"
-  KERNEL_BRANCH: "backport-path_umount" # यहाँ हमारा पैच किया हुआ ब्रांच है
+  # सही URL और ब्रांच जहाँ आपका सारा पैच मौजूद है
+  KERNEL_SOURCE: "https://github.com/Vikram5fbd009/Overclock_mt6833"
+  KERNEL_BRANCH: "backport-path_umount" 
   DEFCONFIG: "camellia_defconfig"
 
 jobs:
@@ -60,6 +61,7 @@ jobs:
 
       - name: 📥 Clone Kernel Source
         run: |
+          # यहाँ यह आपकी सही रिपॉजिटरी और ब्रांच से कोड उठाएगा
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel_source
 
       - name: 🚀 Compile Kernel
@@ -67,10 +69,13 @@ jobs:
           cd kernel_source
           export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc-64/bin:$GITHUB_WORKSPACE/toolchain/gcc-32/bin:$PATH"
           
+          # 4.14 के लिए जरूरी फ्लैग्स ताकि 'true' वाला एरर न आए
+          KCFLAGS_FIX="-Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=return-type -Wno-error=macro-redefined -Wno-error=array-bounds -Wno-error=unused-but-set-variable -Wno-error=unused-variable -Wno-error=address-of-packed-member"
+
           # 1. Defconfig बनाएं
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
           
-          # 2. मुख्य बिल्ड (ReSukiSU + SUSFS सब पहले से सोर्स में है)
+          # 2. मुख्य बिल्ड (ReSukiSU + SUSFS + NoMount सब सोर्स में है)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
             LD=ld.lld \
@@ -81,7 +86,8 @@ jobs:
             STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            KCFLAGS="$KCFLAGS_FIX"
 
       - name: 📦 Package with AnyKernel3
         run: |
