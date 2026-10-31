@@ -5,7 +5,7 @@ on:
 
 env:
   DEVICE: "camellia"
-  # सही URL और ब्रांच जहाँ आपका सारा पैच मौजूद है
+  # सही URL और ब्रांच जहाँ आपका सारा पैच (SUSFS, ReSukiSU, NoMount) मौजूद है
   KERNEL_SOURCE: "https://github.com/Vikram5fbd009/Overclock_mt6833"
   KERNEL_BRANCH: "backport-path_umount" 
   DEFCONFIG: "camellia_defconfig"
@@ -61,8 +61,23 @@ jobs:
 
       - name: 📥 Clone Kernel Source
         run: |
-          # यहाँ यह आपकी सही रिपॉजिटरी और ब्रांच से कोड उठाएगा
           git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel_source
+
+      - name: 🔗 Setup KernelSU Symlink (Fix for CI)
+        run: |
+          cd kernel_source
+          echo "Creating drivers/kernelsu symlink..."
+          ln -sfn ../KernelSU/kernel drivers/kernelsu
+          
+          # सेफ्टी चेक: अगर Kconfig और Makefile में एंट्री नहीं है तो जोड़ दें
+          if ! grep -q "drivers/kernelsu" drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          fi
+          
+          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
+            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          fi
+          echo "✅ KernelSU Symlink fixed!"
 
       - name: 🚀 Compile Kernel
         run: |
