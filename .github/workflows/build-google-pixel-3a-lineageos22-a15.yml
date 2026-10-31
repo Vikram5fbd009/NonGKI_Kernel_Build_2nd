@@ -1,7 +1,18 @@
-name: Build Camellia (MT6833) - Kernel Only
+name: Build Camellia MT6833 (Kernel Only)
 
 on:
 workflow_dispatch:
+inputs:
+build_type:
+description: "Select build type"
+required: true
+type: choice
+default: "kernel"
+options:
+- kernel
+
+permissions:
+contents: read
 
 env:
 DEVICE_NAME: "camellia"
@@ -23,41 +34,50 @@ CLANG_BRANCH: "master-kernel-build-2022"
 GCC_GNU: true
 GCC_64_SOURCE: "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
 GCC_64_BRANCH: "android12L-release"
+
 GCC_32_SOURCE: "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
 GCC_32_BRANCH: "android12L-release"
 
-Config
+Kernel Config
 
 DEFCONFIG_SOURCE: ""
 DEFCONFIG_NAME: "camellia_defconfig"
 DEFCONFIG_ORIGIN_IMAGE: ""
 DEFCONFIG_FROM_BOOT: false
 
-Disable KernelSU and SUSFS patching
+KernelSU / SUSFS disabled
 
 KERNELSU_SOURCE: ""
 KERNELSU_BRANCH: ""
 KERNELSU_AUTO_GET: "false"
 KERNELSU_AUTO_FORK: ""
 
-SUSFS_ENABLE: false
-SUSFS_FIXED: false
+SUSFS_ENABLE: "false"
+SUSFS_FIXED: "false"
+SUSFS_FOLDER_FIXED: ""
+SUSFS_PATCH_FIXED: ""
 
-Packaging
+AnyKernel3
 
 AK3_SOURCE: "https://github.com/osm0sis/AnyKernel3.git"
 AK3_BRANCH: "master"
+
 BOOT_SOURCE: ""
 NEED_DTBO: false
 NEED_SAFE_DTBO: false
 ROM_TEXT: "flyme"
+
+Build Settings
 
 PYTHON_VERSION: "3"
 PACK_METHOD: "AnyKernel3"
 PACK_KMODULES: "false"
 KERNELSU_METHOD: "shell"
 
-Disable all additional patches
+Disable additional patches
+
+PATCHES_SOURCE: ""
+PATCHES_BRANCH: ""
 
 REKERNEL_ENABLE: "false"
 DROIDSPACES_ENABLE: "false"
@@ -94,17 +114,17 @@ steps:
   - name: Checkout workflow repository
     uses: actions/checkout@v4
 
-  - name: Prepare compilation environment
+  - name: Prepare build environment
     uses: ./.github/workflows/build-env
 
-  - name: Get necessary tools
+  - name: Install build requirements
     uses: ./.github/workflows/build-ready
 
-  - name: Build kernel
+  - name: Compile kernel
     uses: ./.github/workflows/build-process
 
   - name: Package kernel
     uses: ./.github/workflows/pack-process
 
-  - name: Upload kernel artifacts
+  - name: Upload build artifacts
     uses: ./.github/workflows/upload-files
