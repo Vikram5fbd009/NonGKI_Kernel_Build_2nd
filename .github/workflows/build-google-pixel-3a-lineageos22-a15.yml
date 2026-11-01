@@ -6,8 +6,8 @@ on:
 env:
   DEVICE: "camellia"
   # सही URL और ब्रांच जहाँ आपका सारा पैच (SUSFS, ReSukiSU, NoMount) मौजूद है
-  KERNEL_SOURCE: "https://github.com/Vikram5fbd009/Overclock_mt6833"
-  KERNEL_BRANCH: "backport-path_umount" 
+  KERNEL_SOURCE: "https://github.com/Vikram5fbd009/Mt6833_original"
+  KERNEL_BRANCH: "main" 
   DEFCONFIG: "camellia_defconfig"
 
 jobs:
