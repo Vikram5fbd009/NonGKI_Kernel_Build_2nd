@@ -1,10 +1,10 @@
 name: Build Kernel (Camellia)
 
 on:
-  workflow_dispatch: # मैन्युअल बटन (अगर दिखे तो)
-  push:              # 🚀 ऑटोमैटिक ट्रिगर
+  workflow_dispatch:
+  push:
     branches:
-      - main         # जब भी main ब्रांच में कोई कमिट पुश होगी, बिल्ड चलेगी
+      - main
 
 jobs:
   build-kernel:
@@ -31,7 +31,7 @@ jobs:
 
       - name: ☁️ Download Toolchain & Fix Symlinks
         run: |
-          # Clang r383902
+          # Clang
           mkdir -p $GITHUB_WORKSPACE/toolchain/clang
           wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz" -O clang.tar.gz
           tar -C $GITHUB_WORKSPACE/toolchain/clang -zxf clang.tar.gz
@@ -48,7 +48,7 @@ jobs:
           
           rm *.tar.gz
           
-          # Clang Symlinks (यह -EL एरर को खत्म करेगा)
+          # Clang Symlinks
           cd $GITHUB_WORKSPACE/toolchain/gcc-64/bin
           for f in aarch64-linux-android-*; do ln -sf "$f" "${f/aarch64-linux-android-/aarch64-linux-gnu-}"; done
           cd $GITHUB_WORKSPACE/toolchain/gcc-32/bin
@@ -60,15 +60,40 @@ jobs:
         run: |
           git clone --depth=1 -b main https://github.com/Vikram5fbd009/Mt6833_original.git kernel_source
 
-      - name: 🚀 Run Build Script (Capture Logs)
+      - name: 🚀 Compile Kernel (Capture Logs)
         run: |
           cd kernel_source
           set +e
           
-          bash build.sh 2>&1 | tee build.log
+          # टूलचेन सेट करो
+          export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc-64/bin:$GITHUB_WORKSPACE/toolchain/gcc-32/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export STRIP=llvm-strip
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          
+          # 1. Defconfig
+          echo ">>> Generating Defconfig..."
+          make O=out ARCH=arm64 camellia_defconfig 2>&1 | tee build.log
+          
+          # 2. Compile
+          echo ">>> Compiling Kernel..."
+          make -k -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            LLVM=1 LLVM_IAS=1 \
+            2>&1 | tee -a build.log
           
           BUILD_EXIT_CODE=${PIPESTATUS[0]}
           
+          # Error फाइल बनाओ
           echo "=================================================" > errors.txt
           echo "   EXTRACTED ERRORS FROM BUILD LOG" >> errors.txt
           echo "=================================================" >> errors.txt
