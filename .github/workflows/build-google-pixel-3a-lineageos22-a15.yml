@@ -3,21 +3,10 @@ name: Build Kernel (Camellia)
 on:
   workflow_dispatch:
 
-env:
-  DEVICE: "camellia"
-  # सही URL और ब्रांच जहाँ आपका सारा पैच (SUSFS, ReSukiSU, NoMount) मौजूद है
-  KERNEL_SOURCE: "https://github.com/Vikram5fbd009/Mt6833_original"
-  KERNEL_BRANCH: "main" 
-  DEFCONFIG: "camellia_defconfig"
-
 jobs:
   build-kernel:
     name: Build Camellia (MT6833)
     runs-on: ubuntu-22.04
-    env:
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
 
     steps:
       - name: ⏰ Checkout repository
@@ -37,88 +26,75 @@ jobs:
           maven libssl-dev pwgen minicom bc libx11-dev libgl1-mesa-dev xsltproc \
           unzip device-tree-compiler python3 binutils-aarch64-linux-gnu
 
-      - name: ☁️ Download Toolchain (Clang & GCC)
+      - name: ☁️ Download Toolchain & Fix Symlinks
         run: |
-          # Clang r383902 (4.14 के लिए सबसे स्टेबल)
+          # Clang r383902 (4.14 के लिए स्टेबल)
           mkdir -p $GITHUB_WORKSPACE/toolchain/clang
           wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r383902.tar.gz" -O clang.tar.gz
           tar -C $GITHUB_WORKSPACE/toolchain/clang -zxf clang.tar.gz
-          rm clang.tar.gz
-
+          
           # GCC 64-bit
           mkdir -p $GITHUB_WORKSPACE/toolchain/gcc-64
           wget -q "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz" -O gcc64.tar.gz
           tar -C $GITHUB_WORKSPACE/toolchain/gcc-64 -zxf gcc64.tar.gz
-          rm gcc64.tar.gz
-
+          
           # GCC 32-bit
           mkdir -p $GITHUB_WORKSPACE/toolchain/gcc-32
           wget -q "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz" -O gcc32.tar.gz
           tar -C $GITHUB_WORKSPACE/toolchain/gcc-32 -zxf gcc32.tar.gz
-          rm gcc32.tar.gz
           
-          echo "✅ Toolchain Downloaded!"
+          rm *.tar.gz
+          
+          # 🚀 THE FIX: Clang 'gnu' असेंबलर ढूँढ रहा था, पर टूलचेन 'android' है। हम 'gnu' के नाम से symlink बना रहे हैं।
+          cd $GITHUB_WORKSPACE/toolchain/gcc-64/bin
+          for f in aarch64-linux-android-*; do ln -sf "$f" "${f/aarch64-linux-android-/aarch64-linux-gnu-}"; done
+          
+          cd $GITHUB_WORKSPACE/toolchain/gcc-32/bin
+          for f in arm-linux-androideabi-*; do ln -sf "$f" "${f/arm-linux-androideabi-/arm-linux-gnueabi-}"; done
+          
+          echo "✅ Toolchain Downloaded & Symlinks Fixed!"
 
       - name: 📥 Clone Kernel Source
         run: |
-          git clone --depth=1 -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel_source
+          # तुम्हारी Mt6833_original रेपो की main ब्रांच
+          git clone --depth=1 -b main https://github.com/Vikram5fbd009/Mt6833_original.git kernel_source
 
-      - name: 🔗 Setup KernelSU Symlink (Fix for CI)
+      - name: 🚀 Run Build Script (Capture Logs)
         run: |
           cd kernel_source
-          echo "Creating drivers/kernelsu symlink..."
-          ln -sfn ../KernelSU/kernel drivers/kernelsu
+          set +e # बिल्ड फेल होने पर भी आगे का स्टेप चले
           
-          # सेफ्टी चेक: अगर Kconfig और Makefile में एंट्री नहीं है तो जोड़ दें
-          if ! grep -q "drivers/kernelsu" drivers/Makefile; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          # build.sh रन करो और आउटपुट को build.log में सेव करो
+          bash build.sh 2>&1 | tee build.log
+          
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          
+          # सिर्फ ज़रूरी एरर्स को errors.txt में निकालो
+          echo "=================================================" > errors.txt
+          echo "   EXTRACTED ERRORS FROM BUILD LOG" >> errors.txt
+          echo "=================================================" >> errors.txt
+          grep -iE "error:|fatal error|undefined reference|No rule to make target|extraneous text|unrecognized option" build.log >> errors.txt || true
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "❌ Build Failed! Check the uploaded artifacts for logs."
+            exit 1
           fi
-          
-          if ! grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig; then
-            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          fi
-          echo "✅ KernelSU Symlink fixed!"
 
-      - name: 🚀 Compile Kernel
+      - name: 📦 Package with AnyKernel3 (Only if build succeeds)
+        if: success()
         run: |
-          cd kernel_source
-          export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc-64/bin:$GITHUB_WORKSPACE/toolchain/gcc-32/bin:$PATH"
-          
-          # 4.14 के लिए जरूरी फ्लैग्स ताकि 'true' वाला एरर न आए
-          KCFLAGS_FIX="-Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=return-type -Wno-error=macro-redefined -Wno-error=array-bounds -Wno-error=unused-but-set-variable -Wno-error=unused-variable -Wno-error=address-of-packed-member"
-
-          # 1. Defconfig बनाएं
-          make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
-          
-          # 2. मुख्य बिल्ड (ReSukiSU + SUSFS + NoMount सब सोर्स में है)
-          make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            KCFLAGS="$KCFLAGS_FIX"
-
-      - name: 📦 Package with AnyKernel3
-        run: |
-          # AnyKernel3 क्लोन करें
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git -b master anykernel
-          
-          # Image को AnyKernel3 में कॉपी करें
           cp kernel_source/out/arch/arm64/boot/Image.gz-dtb anykernel/
-          
-          # AnyKernel3 को ज़िप करें
           cd anykernel
-          zip -r ../AnyKernel3-${{ env.DEVICE }}.zip . -x "*.git*"
+          zip -r ../Camellia-Kernel.zip . -x "*.git*"
 
-      - name: ✏️ Upload Artifact
+      - name: ✏️ Upload Artifacts (Logs & Kernel)
         uses: actions/upload-artifact@v4
+        if: always() # 🚀 बिल्ड फेल होने पर भी लॉग्स और kernel zip अपलोड होगी
         with:
-          name: Camellia-Kernel-${{ github.run_id }}
-          path: AnyKernel3-${{ env.DEVICE }}.zip
+          name: Camellia-Build-Output
+          path: |
+            kernel_source/build.log
+            kernel_source/errors.txt
+            Camellia-Kernel.zip
           retention-days: 7
