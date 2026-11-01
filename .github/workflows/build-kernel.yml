@@ -1,155 +1,31 @@
-name: Build Camellia (MT6811)
+#!/bin/bash
+set -e
+export PATH="$GITHUB_WORKSPACE/toolchain/clang/bin:$GITHUB_WORKSPACE/toolchain/gcc-64/bin:$GITHUB_WORKSPACE/toolchain/gcc-32/bin:$PATH"
 
-on:
-  workflow_call:
-  workflow_dispatch:
+export ARCH=arm64
+export SUBARCH=arm64
+export CC=clang
+export LD=ld.lld
+export AR=llvm-ar
+export NM=llvm-nm
+export OBJCOPY=llvm-objcopy
+export OBJDUMP=llvm-objdump
+export STRIP=llvm-strip
 
-env:
-  # Device env
-  DEVICE_NAME : "camellia"
-  DEVICE_CODENAME : "camellia"
+export CLANG_TRIPLE=aarch64-linux-gnu-
+export CROSS_COMPILE=aarch64-linux-android-
+export CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
-  CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
-  EXTRA_CMDS : "LD=ld.lld"
+# गलत फ्लैग हटा दिया गया है
+KCFLAGS_FIX="-Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=return-type -Wno-error=macro-redefined -Wno-error=array-bounds -Wno-error=unused-variable -Wno-error=address-of-packed-member"
+HOSTCFLAGS_FIX="-Wno-error=deprecated-declarations"
 
-  # Kernel Source
-  KERNEL_SOURCE : "https://github.com/vikram2fbd009-maker/Overclock_mt6833"
-  KERNEL_BRANCH : "flyme"
+echo ">>> Generating Defconfig..."
+make O=out ARCH=arm64 camellia_defconfig
 
-  # Toolchain (Clang & GCC)
-  CLANG_SOURCE : "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
-  CLANG_BRANCH : "master-kernel-build-2022"
-  GCC_GNU : true
-  GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
-  GCC_64_BRANCH : "android12L-release"
-  GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
-  GCC_32_BRANCH : "android12L-release"
-
-  # Config
-  DEFCONFIG_SOURCE: ""
-  DEFCONFIG_NAME : "camellia_defconfig"
-  DEFCONFIG_ORIGIN_IMAGE: ""
-  DEFCONFIG_FROM_BOOT: false
-
-  # KernelSU & SUSFS
-  KERNELSU_SOURCE : ""
-  KERNELSU_BRANCH : ""
-  KERNELSU_AUTO_GET : "true"
-  KERNELSU_AUTO_FORK : "bakasu" # BakaSU
-
-  SUSFS_ENABLE : true
-  SUSFS_FIXED : true
-
-  # Packing
-  AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
-  AK3_BRANCH : "master"
-  BOOT_SOURCE : ""
-  NEED_DTBO : false
-  NEED_SAFE_DTBO : false
-  ROM_TEXT : "flyme"
-
-  # Other env
-  PYTHON_VERSION: "3"
-  PACK_METHOD: "AnyKernel3"
-  PACK_KMODULES: "false"
-  KERNELSU_METHOD: "shell"
-  PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches"
-  PATCHES_BRANCH: "mi_kernel"
-
-  SUSFS_FOLDER_FIXED: ""
-  SUSFS_PATCH_FIXED: ""
-
-  REKERNEL_ENABLE: "false"
-  DROIDSPACES_ENABLE: "false"
-  NOMOUNT_ENABLE: "false"
-  HOOK_METHOD: "manual"
-
-  KPM_ENABLE: "false"
-  KPM_INLINE: "false"
-  KPM_KPATCH_NEXT: "false"
-  KPM_PATCH_SOURCE: "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU_patch/refs/heads/main/kpm/patch_linux"
-
-  BASEBAND_GUARD_ENABLE: "false"
-  BASEBAND_GUARD_BOOT: "false"
-
-  GENERATE_DTB: "false"
-  GENERATE_CHIP: "mediatek"
-
-  BUILD_DEBUGGER: "false"
-  SKIP_PATCH: "false"
-  BUILD_OTHER_CONFIG: "false"
-  MERGE_CONFIG_FILES: ""
-  FREE_MORE_SPACE: "false"
-
-jobs:
-  build-kernel:
-    name: Build Camellia (MT6833)
-    runs-on: ubuntu-22.04 # 4.14 ke liye 22.04 zyada stable hai
-    env:
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
-
-    steps:
-      - name: ⏰ Checkout repository
-        uses: actions/checkout@v4
-
-      - name: ⌛️ Compilation environment preparation
-        uses: ./.github/workflows/build-env
-
-      - name: ⚙️ Get necessary tools
-        uses: ./.github/workflows/build-ready
-
-      - name: 🪝 Patch Kernel of SUSFS
-        uses: ./.github/workflows/patch-susfs
-
-      - name: 🔗 Patch for no-kprobe
-        uses: ./.github/workflows/patch-no-kprobe
-
-      # =========================================================
-      # MANUAL FIX FOR SUSFS ERROR
-      # =========================================================
-      - name: 🩹 Manual Fix for SUSFS task_mmu.c
-        run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          
-          echo "1. Adding missing SUSFS header..."
-          sed -i '1i #include <linux/susfs.h>' fs/proc/task_mmu.c
-          
-          echo "2. Fixing smap_gather_stats return type..."
-          sed -i 's/static void smap_gather_stats/static int smap_gather_stats/g' fs/proc/task_mmu.c
-          
-          echo "[+] Manual fix applied! Build should pass now."
-      # =========================================================
-
-      - name: 🪛 Extra Kernel Options
-        run: |
-          cd $GITHUB_WORKSPACE/device_kernel
-          echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/camellia_defconfig
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' ./arch/arm64/configs/camellia_defconfig
-
-      - name: 🧰 Patch Kernel of Re:Kernel
-        uses: ./.github/workflows/patch-rekernel
-
-      - name: 💿 Patch Kernel of Droidspaces
-        uses: ./.github/workflows/patch-droidspaces
-
-      - name: 🔒 Patch Kernel of Baseband Guard
-        uses: ./.github/workflows/patch-baseband-guard
-
-      - name: 🛡️ Patch Kernel of NoMount
-        uses: ./.github/workflows/patch-nomount
-
-      - name: ❌ Set Swap
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 16
-
-      - name: 🚀 Build Process
-        uses: ./.github/workflows/build-process
-
-      - name: 🔩 Pack Process
-        uses: ./.github/workflows/pack-process
-
-      - name: ✏️ Upload Artifacts
-        uses: ./.github/workflows/upload-files
+echo ">>> Compiling Kernel..."
+make -k -j$(nproc --all) O=out ARCH=arm64 \
+  CC=clang \
+  LLVM=1 LLVM_IAS=1 \
+  KCFLAGS="$KCFLAGS_FIX" \
+  HOSTCFLAGS="$HOSTCFLAGS_FIX"
